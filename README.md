@@ -1,22 +1,163 @@
-tere!
 cd C:\ADProjekt
+
+Set-ExecutionPolicy -Scope Process Bypass
+
+käivitada käsuga:
 .\Loo-DomeeniKasutajad.ps1
 
+Domeen: kehtna.com
+
+
+
+
+
+
+
+
+
+
+#requires -Modules ActiveDirectory
 
 Import-Module ActiveDirectory
 
-$Domain = "DC=kehtna,DC=com"
-$UsersOU = "OU=Kasutajad,$Domain"
-$GroupsOU = "OU=Grupid,$Domain"
+$DomainDN = "DC=kehtna,DC=com"
 $CsvPath = Join-Path $PSScriptRoot "nimekiri.csv"
-$Password = ConvertTo-SecureString "Koolitoo2026!" -AsPlainText -Force
 
-$u = [char]0x00FC
+$PasswordPlain = "Koolitoo2026!"
+$Password = ConvertTo-SecureString $PasswordPlain -AsPlainText -Force
 
-$OUList = @(
+Write-Host ""
+Write-Host "============================================"
+Write-Host "ACTIVE DIRECTORY KASUTAJATE LOOMINE"
+Write-Host "============================================"
+Write-Host ""
+
+# Kontrollime CSV-d
+if (-not (Test-Path $CsvPath)) {
+    Write-Host "VIGA: nimekiri.csv ei leitud!" -ForegroundColor Red
+    exit
+}
+
+$Users = Import-Csv $CsvPath
+
+Write-Host "Domeen: kehtna.com"
+Write-Host "Kasutajaid CSV-s: $($Users.Count)"
+Write-Host ""
+
+# --------------------------------------------------
+# 1. KASUTAJATE PÕHI-OU
+# --------------------------------------------------
+
+$UsersOU = Get-ADOrganizationalUnit `
+    -Filter "Name -eq 'Kasutajad'" `
+    -SearchBase $DomainDN
+
+if (-not $UsersOU) {
+    New-ADOrganizationalUnit `
+        -Name "Kasutajad" `
+        -Path $DomainDN
+
+    $UsersOU = Get-ADOrganizationalUnit `
+        -Filter "Name -eq 'Kasutajad'" `
+        -SearchBase $DomainDN
+}
+
+Write-Host "Kasutajate OU: $($UsersOU.DistinguishedName)"
+
+# --------------------------------------------------
+# 2. GRUPPIDE OU
+# --------------------------------------------------
+
+$GroupsOU = Get-ADOrganizationalUnit `
+    -Filter "Name -eq 'Grupid'" `
+    -SearchBase $DomainDN
+
+if (-not $GroupsOU) {
+    New-ADOrganizationalUnit `
+        -Name "Grupid" `
+        -Path $DomainDN
+
+    $GroupsOU = Get-ADOrganizationalUnit `
+        -Filter "Name -eq 'Grupid'" `
+        -SearchBase $DomainDN
+}
+
+Write-Host "Gruppide OU: $($GroupsOU.DistinguishedName)"
+Write-Host ""
+
+# --------------------------------------------------
+# 3. OLEMASOLEVATE OU-DE LEIDMINE
+# --------------------------------------------------
+
+$AllUserOUs = Get-ADOrganizationalUnit `
+    -SearchBase $UsersOU.DistinguishedName `
+    -SearchScope OneLevel `
+    -Filter *
+
+Write-Host "Kasutajate OU-d kontrollitud."
+
+# --------------------------------------------------
+# 4. AMET -> OU
+# --------------------------------------------------
+
+$JobToOU = @{
+    "CEO"                 = "Juhtkond"
+    "COO"                 = "Juhtkond"
+
+    "CTO"                 = "IT"
+    "IT manager"          = "IT"
+    "IT Support"          = "IT"
+    "Software Engineer"   = "IT"
+    "Software Developer"  = "IT"
+    "Web Developer"       = "IT"
+    "Web Engineer"        = "IT"
+    "Database Developer"  = "IT"
+
+    "Sales"               = "Müük"
+    "Sales Executive"     = "Müük"
+    "Sales Support"       = "Müük"
+
+    "Product Manager"     = "Toode"
+
+    "Marketing"           = "Turundus"
+    "Marketing Manager"   = "Turundus"
+
+    "HR Specialist"       = "Personal"
+
+    "Administrator"       = "Administratsioon"
+
+    "Cleaning Manager"    = "Haldus"
+
+    "Financial Advisor"   = "Finants"
+    "Accountant"          = "Finants"
+
+    "Graphic Designer"    = "Disain"
+    "Graphic Artist"      = "Disain"
+
+    "Data Analyst"        = "Analüütika"
+    "Research Scientist"  = "Analüütika"
+    "Business Analyst"    = "Analüütika"
+
+    "Architect"           = "Tehnika"
+    "Mechanical Engineer" = "Tehnika"
+
+    "Lawyer"              = "Juriidika"
+
+    "Project Manager"     = "Projektid"
+
+    "Journalist"          = "Muu"
+    "Event Planner"       = "Muu"
+    "Social Worker"       = "Muu"
+}
+
+# --------------------------------------------------
+# 5. LOOME PUUDUVAD OUD
+# --------------------------------------------------
+
+$RequiredOUs = @(
     "Juhtkond",
     "IT",
-    ("M" + $u + $u + "k"),
+    "Müük",
     "Toode",
     "Turundus",
     "Personal",
@@ -24,192 +165,264 @@ $OUList = @(
     "Haldus",
     "Finants",
     "Disain",
-    ("Anal" + $u + $u + "tika"),
+    "Analüütika",
     "Tehnika",
     "Juriidika",
     "Projektid",
     "Muu"
 )
 
-if (-not (Get-ADOrganizationalUnit -Identity $UsersOU -ErrorAction SilentlyContinue)) {
-    New-ADOrganizationalUnit -Name "Kasutajad" -Path $Domain -ProtectedFromAccidentalDeletion $false
-}
+foreach ($OUName in $RequiredOUs) {
 
-if (-not (Get-ADOrganizationalUnit -Identity $GroupsOU -ErrorAction SilentlyContinue)) {
-    New-ADOrganizationalUnit -Name "Grupid" -Path $Domain -ProtectedFromAccidentalDeletion $false
-}
+    $ExistingOU = Get-ADOrganizationalUnit `
+        -SearchBase $UsersOU.DistinguishedName `
+        -SearchScope OneLevel `
+        -Filter "Name -eq '$OUName'" `
+        -ErrorAction SilentlyContinue
 
-foreach ($OUName in $OUList) {
-    $OUPath = "OU=$OUName,$UsersOU"
+    if (-not $ExistingOU) {
 
-    if (-not (Get-ADOrganizationalUnit -Identity $OUPath -ErrorAction SilentlyContinue)) {
-        New-ADOrganizationalUnit -Name $OUName -Path $UsersOU -ProtectedFromAccidentalDeletion $false
+        New-ADOrganizationalUnit `
+            -Name $OUName `
+            -Path $UsersOU.DistinguishedName
+
+        Write-Host "OU loodud: $OUName"
     }
 }
 
-if (-not (Test-Path $CsvPath)) {
-    Write-Host "CSV faili ei leitud: $CsvPath" -ForegroundColor Red
-    exit
-}
+Write-Host ""
+Write-Host "Kõik vajalikud OUid on olemas."
+Write-Host ""
 
-$Users = Import-Csv $CsvPath
+# --------------------------------------------------
+# 6. DIACRITICS -> KASUTAJANIMI
+# --------------------------------------------------
 
-function Convert-ToSamAccountName {
-    param (
-        [string]$Name
+function Remove-Diacritics {
+    param(
+        [string]$Text
     )
 
-    $Result = $Name.ToLower()
+    $normalized = $Text.Normalize(
+        [System.Text.NormalizationForm]::FormD
+    )
 
-    $Result = $Result.Replace("ü", "u")
-    $Result = $Result.Replace("ä", "a")
-    $Result = $Result.Replace("ö", "o")
-    $Result = $Result.Replace("õ", "o")
+    $result = ""
 
-    $Result = $Result -replace '[^a-z0-9 ]', ''
-    $Result = $Result.Trim()
-    $Result = $Result -replace '\s+', '.'
+    foreach ($char in $normalized.ToCharArray()) {
 
-    return $Result
-}
-
-foreach ($User in $Users) {
-
-    $FullName = $User.Name
-    $City = $User.City
-    $Job = $User.Job
-
-    $NameParts = $FullName -split '\s+'
-    $GivenName = $NameParts[0]
-    $Surname = $NameParts[-1]
-
-    $SamAccountName = Convert-ToSamAccountName $FullName
-
-    $ExistingUser = Get-ADUser -Filter "SamAccountName -eq '$SamAccountName'" -ErrorAction SilentlyContinue
-
-    switch -Regex ($Job) {
-
-        "^(CEO|COO|CTO)$" {
-            $DepartmentOU = "Juhtkond"
-            break
-        }
-
-        "IT manager|IT Support|Software Engineer|Software Developer|Web Developer|Web Engineer|Database Developer" {
-            $DepartmentOU = "IT"
-            break
-        }
-
-        "Sales$|Sales Executive|Sales Support" {
-            $DepartmentOU = "M" + $u + $u + "k"
-            break
-        }
-
-        "Product Manager|Cleaning Manager" {
-            $DepartmentOU = "Toode"
-            break
-        }
-
-        "Marketing|Marketing Manager" {
-            $DepartmentOU = "Turundus"
-            break
-        }
-
-        "HR Specialist" {
-            $DepartmentOU = "Personal"
-            break
-        }
-
-        "Administrator" {
-            $DepartmentOU = "Administratsioon"
-            break
-        }
-
-        "Accountant|Financial Advisor" {
-            $DepartmentOU = "Finants"
-            break
-        }
-
-        "Graphic Artist|Graphic Designer" {
-            $DepartmentOU = "Disain"
-            break
-        }
-
-        "Data Analyst|Research Scientist|Business Analyst" {
-            $DepartmentOU = "Anal" + $u + $u + "tika"
-            break
-        }
-
-        "Architect|Mechanical Engineer" {
-            $DepartmentOU = "Tehnika"
-            break
-        }
-
-        "Lawyer" {
-            $DepartmentOU = "Juriidika"
-            break
-        }
-
-        "Project Manager|Event Planner" {
-            $DepartmentOU = "Projektid"
-            break
-        }
-
-        default {
-            $DepartmentOU = "Muu"
+        if (
+            [Globalization.CharUnicodeInfo]::GetUnicodeCategory($char) `
+            -ne [Globalization.UnicodeCategory]::NonSpacingMark
+        ) {
+            $result += $char
         }
     }
 
-    $TargetOU = "OU=$DepartmentOU,$UsersOU"
+    return $result.Normalize(
+        [System.Text.NormalizationForm]::FormC
+    )
+}
+
+# --------------------------------------------------
+# 7. KASUTAJATE LOOMINE
+# --------------------------------------------------
+
+$NewUsers = 0
+$UpdatedUsers = 0
+
+foreach ($Person in $Users) {
+
+    $FullName = $Person.Name.Trim()
+    $City = $Person.City.Trim()
+    $Job = $Person.Job.Trim()
+
+    # Leiame OU
+    $TargetOUName = $JobToOU[$Job]
+
+    if (-not $TargetOUName) {
+        $TargetOUName = "Muu"
+    }
+
+    # Leiame OU täpselt nime järgi
+    $TargetOU = Get-ADOrganizationalUnit `
+        -SearchBase $UsersOU.DistinguishedName `
+        -SearchScope OneLevel `
+        -Filter "Name -eq '$TargetOUName'" `
+        -ErrorAction Stop
+
+    # Ees- ja perekonnanimi
+    $NameParts = $FullName -split " "
+
+    $FirstName = $NameParts[0]
+    $LastName = $NameParts[-1]
+
+    # Kasutajanimi
+    $FirstClean = Remove-Diacritics $FirstName
+    $LastClean = Remove-Diacritics $LastName
+
+    $Sam = "$($FirstClean.ToLower()).$($LastClean.ToLower())"
+
+    if ($Sam.Length -gt 20) {
+        $Sam = $Sam.Substring(0,20)
+    }
+
+    # Kontrollime olemasolevat kasutajat
+    $ExistingUser = Get-ADUser `
+        -Filter "SamAccountName -eq '$Sam'" `
+        -ErrorAction SilentlyContinue
 
     if ($ExistingUser) {
 
-        Set-ADUser -Identity $ExistingUser `
+        Set-ADUser `
+            -Identity $ExistingUser `
             -City $City `
             -Title $Job `
-            -GivenName $GivenName `
-            -Surname $Surname `
+            -GivenName $FirstName `
+            -Surname $LastName `
             -DisplayName $FullName
 
-        Move-ADObject -Identity $ExistingUser.DistinguishedName -TargetPath $TargetOU
+        # Liigutame õigesse OU-sse
+        Move-ADObject `
+            -Identity $ExistingUser.DistinguishedName `
+            -TargetPath $TargetOU.DistinguishedName
 
+        Write-Host "UUENDATUD: $FullName"
+        Write-Host "   Kasutajanimi: $Sam"
+        Write-Host "   Amet: $Job"
+        Write-Host "   Linn: $City"
+        Write-Host "   OU: $TargetOUName"
+        Write-Host ""
+
+        $UpdatedUsers++
     }
     else {
 
-        New-ADUser -Name $FullName `
-            -GivenName $GivenName `
-            -Surname $Surname `
+        New-ADUser `
+            -Name $FullName `
+            -GivenName $FirstName `
+            -Surname $LastName `
             -DisplayName $FullName `
-            -SamAccountName $SamAccountName `
-            -UserPrincipalName "$SamAccountName@kehtna.com" `
-            -City $City `
-            -Title $Job `
-            -Path $TargetOU `
+            -SamAccountName $Sam `
+            -UserPrincipalName "$Sam@kehtna.com" `
             -AccountPassword $Password `
             -Enabled $true `
-            -ChangePasswordAtLogon $false
-    }
+            -ChangePasswordAtLogon $false `
+            -City $City `
+            -Title $Job `
+            -Path $TargetOU.DistinguishedName
 
-    $GroupName = "GRP-" + ($Job -replace '[^a-zA-Z0-9]+','-').Trim('-')
+        Write-Host "LOODUD: $FullName"
+        Write-Host "   Kasutajanimi: $Sam"
+        Write-Host "   Amet: $Job"
+        Write-Host "   Linn: $City"
+        Write-Host "   OU: $TargetOUName"
+        Write-Host ""
 
-    $ExistingGroup = Get-ADGroup -SearchBase $GroupsOU -Filter "Name -eq '$GroupName'" -ErrorAction SilentlyContinue
-
-    if (-not $ExistingGroup) {
-
-        New-ADGroup -Name $GroupName `
-            -SamAccountName $GroupName `
-            -GroupCategory Security `
-            -GroupScope Global `
-            -Path $GroupsOU
-    }
-
-    $ADUser = Get-ADUser -Identity $SamAccountName
-
-    $IsMember = Get-ADGroupMember -Identity $GroupName -Recursive -ErrorAction SilentlyContinue |
-        Where-Object { $_.SamAccountName -eq $SamAccountName }
-
-    if (-not $IsMember) {
-        Add-ADGroupMember -Identity $GroupName -Members $ADUser
+        $NewUsers++
     }
 }
 
-Write-Host "Kasutajate ja gruppide loomine lõpetatud!" -ForegroundColor Green
+# --------------------------------------------------
+# 8. AMETITE GRUPID
+# --------------------------------------------------
+
+Write-Host ""
+Write-Host "============================================"
+Write-Host "AMETITE GRUPPIDE LOOMINE"
+Write-Host "============================================"
+Write-Host ""
+
+$Jobs = $Users | Select-Object -ExpandProperty Job -Unique
+
+foreach ($Job in $Jobs) {
+
+    $GroupName = "GRP-" + ($Job -replace "[^a-zA-Z0-9-]", "-")
+
+    $ExistingGroup = Get-ADGroup `
+        -Filter "Name -eq '$GroupName'" `
+        -SearchBase $GroupsOU.DistinguishedName `
+        -ErrorAction SilentlyContinue
+
+    if (-not $ExistingGroup) {
+
+        New-ADGroup `
+            -Name $GroupName `
+            -SamAccountName $GroupName `
+            -GroupCategory Security `
+            -GroupScope Global `
+            -Path $GroupsOU.DistinguishedName
+
+        $ExistingGroup = Get-ADGroup `
+            -Identity $GroupName
+    }
+
+    Write-Host "GRUPP: $GroupName"
+
+    $JobUsers = $Users | Where-Object {
+        $_.Job -eq $Job
+    }
+
+    foreach ($Person in $JobUsers) {
+
+        $CleanFirst = Remove-Diacritics $Person.Name.Split(" ")[0]
+        $CleanLast = Remove-Diacritics $Person.Name.Split(" ")[-1]
+
+        $Sam = "$($CleanFirst.ToLower()).$($CleanLast.ToLower())"
+
+        if ($Sam.Length -gt 20) {
+            $Sam = $Sam.Substring(0,20)
+        }
+
+        $ADUser = Get-ADUser `
+            -Filter "SamAccountName -eq '$Sam'" `
+            -ErrorAction SilentlyContinue
+
+        if ($ADUser) {
+
+            $AlreadyMember = Get-ADGroupMember `
+                -Identity $ExistingGroup `
+                -Recursive `
+                -ErrorAction SilentlyContinue |
+                Where-Object {
+                    $_.SamAccountName -eq $Sam
+                }
+
+            if (-not $AlreadyMember) {
+
+                Add-ADGroupMember `
+                    -Identity $ExistingGroup `
+                    -Members $ADUser
+
+                Write-Host "   + $($Person.Name)"
+            }
+        }
+    }
+
+    Write-Host ""
+}
+
+# --------------------------------------------------
+# 9. VALMIS
+# --------------------------------------------------
+
+Write-Host ""
+Write-Host "============================================"
+Write-Host "VALMIS!"
+Write-Host "============================================"
+Write-Host ""
+
+Write-Host "Domeen: kehtna.com"
+Write-Host "CSV kasutajaid: $($Users.Count)"
+Write-Host "Uusi kasutajaid: $NewUsers"
+Write-Host "Uuendatud kasutajaid: $UpdatedUsers"
+Write-Host ""
+
+Write-Host "Kõik kasutajad on loodud/uuendatud."
+Write-Host "Kõik ametite grupid on loodud."
+Write-Host "Asukohad on City väljal."
+Write-Host "Ametid on Job Title väljal."
+Write-Host ""
+Write-Host "Algne parool kõigile kasutajatele:"
+Write-Host "Koolitoo2026!"
+Write-Host ""
